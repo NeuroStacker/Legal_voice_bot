@@ -1,5 +1,6 @@
 # Legal_voice_bot
-# LegalVoiceBot  
+![LegalVoiceBot UI](assets/bot-ui.jpg)
+
 
 LegalVoiceBot is an AI-powered legal assistant chatbot that supports both voice and text input. It processes legal queries, summarizes legal documents, and provides responses in both text and voice using Mistral AI’s API.  
 
