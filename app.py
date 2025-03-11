@@ -13,19 +13,13 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 socketio = SocketIO(app)
-
-# Legal Assistant API Configuration (using a Mistral-based model)
-LEGAL_API_KEY = "XZDVrVnzsZTnakgniECWmP9OS6QjhaiY"  # Replace with your actual API key
-LEGAL_MODEL = "mistral-legal-assistant"       # Replace with your model identifier
+LEGAL_API_KEY = "your_api_key" 
+LEGAL_MODEL = "mistral-medium"  # Changed from "mistral-legal-assistant" to a standard model      
 LEGAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"  # API endpoint
-
-# Queue for speech processing; items will be tuples of (token, sentence)
 tts_queue = queue.Queue()
 
-# Global token to keep track of the current response
 current_token = 0
 
-# Function to fetch legal response from the API
 def get_legal_response(user_input):
     headers = {
         "Authorization": f"Bearer {LEGAL_API_KEY}",
@@ -39,29 +33,35 @@ def get_legal_response(user_input):
                 "role": "system", 
                 "content": (
                     "You are an AI legal assistant. Provide clear and concise legal information. "
-                    "Begin by summarizing the legal issue, then outline relevant statutes or guidelines "
-                    "in simple language. Include a disclaimer stating that this is not legal advice and "
+                    "Begin by summarizing the legal issue, then outline relevant statutes or guidelines dont mention summarise in response "
+                    "in simple language. Include a disclaimer stating that this is not legal advice "
                     "that users should consult a qualified attorney for personalized counsel."
                 )
             },
             {"role": "user", "content": user_input}
         ],
-        "max_tokens": 150,
+        "max_tokens": 500,  # Increased from 150 to give more detailed responses
         "temperature": 0.7
     }
 
     try:
-        response = requests.post(LEGAL_ENDPOINT, json=data, headers=headers)
+        # Added timeout and better error handling
+        response = requests.post(LEGAL_ENDPOINT, json=data, headers=headers, timeout=30)
         response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"]
     except requests.exceptions.RequestException as e:
-        return f"Error: Unable to fetch legal response. {str(e)}"
+        # Enhanced error reporting
+        error_message = f"Error: Unable to fetch legal response. {str(e)}"
+        if hasattr(e, 'response') and e.response is not None:
+            error_message += f"\nResponse details: {e.response.text}"
+        print(error_message)  # Print to server console for debugging
+        return error_message
 
 def stream_response(user_input, token):
     global current_token
     if token != current_token:
-        return  # Exit if this response is no longer current
+        return  
 
     socketio.emit('thinking_status', {'status': True})
 
@@ -75,7 +75,7 @@ def stream_response(user_input, token):
         for sentence in sentences:
             if token != current_token:
                 print("Token changed, stopping response streaming")
-                break  # Stop processing if token has changed
+                break  
 
             accumulated_text += (" " if accumulated_text else "") + sentence
             socketio.emit('response_stream', {'text': accumulated_text, 'is_final': False})
@@ -83,7 +83,7 @@ def stream_response(user_input, token):
             print(f"Adding sentence to TTS queue: '{sentence}'")
             tts_queue.put((token, sentence))
 
-            socketio.sleep(0.3)  # Reduced delay for quicker response
+            socketio.sleep(0.3) 
 
         if token == current_token:
             socketio.emit('response_stream', {'text': accumulated_text, 'is_final': True})
@@ -95,7 +95,6 @@ def stream_response(user_input, token):
         if token == current_token:
             socketio.emit('thinking_status', {'status': False})
 
-# Function to handle speech recognition with improved error handling
 def recognize_speech():
     global current_token, tts_queue
     recognizer = sr.Recognizer()
@@ -119,7 +118,7 @@ def recognize_speech():
 
         socketio.emit('speech_recognized', {'text': user_input})
 
-        # Cancel previous processing before starting a new one
+
         current_token += 1
         print(f"Cancelling previous processing, new token: {current_token}")
 
@@ -131,7 +130,6 @@ def recognize_speech():
         socketio.emit('stop_audio')
         print("Sent stop_audio signal to client")
 
-        # Start response streaming for speech input
         thread = threading.Thread(target=stream_response, args=(user_input, current_token))
         thread.daemon = True
         thread.start()
@@ -148,7 +146,6 @@ def recognize_speech():
         traceback.print_exc()
         socketio.emit('error_message', {'message': f"An error occurred during speech recognition: {str(e)}"})
 
-# Function to generate speech audio optimized for sentence-by-sentence processing
 def text_to_speech(text):
     try:
         if not text or len(text.strip()) < 2:
@@ -157,32 +154,26 @@ def text_to_speech(text):
 
         print(f"Converting to speech: '{text}'")
 
-        # Create temp file in a way that ensures it's accessible
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
             temp_filename = temp_file.name
             print(f"Temp file created: {temp_filename}")
 
-        # Generate and save audio using gTTS
         tts = gTTS(text=text, lang='en', slow=False)
         tts.save(temp_filename)
         print("Audio saved to temp file")
 
-        # Add a small delay to ensure file is fully written
         time.sleep(0.2)
 
-        # Read the audio file
         with open(temp_filename, 'rb') as audio_file:
             audio_data = base64.b64encode(audio_file.read()).decode('utf-8')
             print(f"Audio file read, size: {len(audio_data)} chars")
 
-        # Clean up temp file
         try:
             os.unlink(temp_filename)
             print("Temp file deleted")
         except Exception as e:
             print(f"Warning: Could not delete temp file: {str(e)}")
 
-        # Send the audio data to the client
         print("Sending audio data to client")
         socketio.emit('play_audio', {'audio_data': audio_data})
         print("Audio data sent")
@@ -190,8 +181,6 @@ def text_to_speech(text):
     except Exception as e:
         print(f"TTS Error: {str(e)}")
         socketio.emit('error_message', {'message': f'Error generating speech: {str(e)}'})
-
-# TTS worker thread: processes items from the queue if they belong to the current message
 def tts_worker():
     global current_token
     print("TTS worker thread started")
@@ -214,8 +203,6 @@ def tts_worker():
                 tts_queue.task_done()
             except:
                 pass
-
-# Start TTS worker thread
 print("Starting TTS worker thread")
 tts_thread = threading.Thread(target=tts_worker)
 tts_thread.daemon = True
@@ -258,8 +245,6 @@ def handle_message(data):
         return
 
     print(f"Received new message: '{user_input}'")
-
-    # Cancel previous processing
     current_token += 1
     print(f"Cancelling previous processing, new token: {current_token}")
 
@@ -267,12 +252,9 @@ def handle_message(data):
         queue_size = len(tts_queue.queue)
         tts_queue.queue.clear()
         print(f"Cleared TTS queue ({queue_size} items removed)")
-
-    # Notify client to stop audio immediately
     socketio.emit('stop_audio')
     print("Sent stop_audio signal to client")
 
-    # Start new processing thread
     print(f"Starting new processing thread for token {current_token}")
     thread = threading.Thread(target=stream_response, args=(user_input, current_token))
     thread.daemon = True
@@ -296,7 +278,6 @@ def handle_disconnect():
 if __name__ == '__main__':
     os.makedirs('templates', exist_ok=True)
 
-    # Updated HTML template for the Legal Assistant with similar features
     html_content = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -373,8 +354,8 @@ if __name__ == '__main__':
             const debugPanel = document.getElementById('debugPanel');
             const micStatus = document.getElementById('micStatus');
             
-            // Uncomment to enable debug panel
-            // debugPanel.style.display = 'block';
+            // Enable debug panel for troubleshooting
+            debugPanel.style.display = 'block';
             
             let isThinking = false;
             let isListening = false;
