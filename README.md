@@ -30,11 +30,15 @@ LegalVoiceBot is an AI-powered legal assistant chatbot that supports both voice 
 
 python -m venv venv
 source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
 3.Install dependencies:
+ 
 pip install -r requirements.txt
 Create a .env file in the project root and add your API key:
 LEGAL_API_KEY=your_actual_api_key_here
-Run the application:
+
+4.Run the application:
 python app.py
-Access the chatbot via:
+
+5.Access the chatbot via:
 http://localhost:5000
